@@ -17,10 +17,12 @@
   3. 婚礼地点：搜索「蓝洋林顿盛宴」替换
   4. 照片：搜索「时光相册」，把三张 <img> 的 src 换成你的图片地址
   5. 背景音乐：
-     · 已内置：music/bgm.m4a（AAC 128k，周深《有一件美好的事情
-       将要发生》完整版 4分21秒，手机全兼容）
-     · 以后想换音乐：把新音频命名为 bgm.m4a 放到「music」文件夹
-       覆盖即可；若找不到 bgm.m4a，会自动播放内置八音盒旋律兜底
+     · 打开信封即自动播放，点右下角音符按钮可暂停/继续
+     · 音乐托管在腾讯云 COS（国内加载快）：
+       https://wedding-invite-1324172788.cos-website.ap-beijing.myqcloud.com/music/bgm.m4a
+     · 以后想换音乐：登录 COS 控制台，把新音频命名为 bgm.m4a
+       上传覆盖 music/ 目录下的同名文件即可
+     · 若音乐加载失败，自动用内置八音盒旋律兜底
   6. 受邀人回复（数据存储）：
      · 已配置"邮箱直收"（FormSubmit 零注册）：
        回复将自动发送到 356543512@qq.com；
@@ -556,8 +558,13 @@ footer{
 <!-- 粒子画布：花瓣 + 星光 -->
 <canvas id="particleCanvas" aria-hidden="true"></canvas>
 
-<!-- 背景音乐（相对路径：music/bgm.m4a；缺失时 JS 自动用内置旋律兜底） -->
-<audio id="bgm" src="music/bgm.m4a" loop preload="metadata" style="display:none"></audio>
+<!-- 背景音乐：打开信封即自动播放；点右下角音符按钮可暂停/继续。
+     主源为腾讯云 COS（国内加载快）；备源为本站相对路径。
+     两个源都失败时，JS 自动改用内置八音盒旋律兜底。 -->
+<audio id="bgm" loop preload="metadata" style="display:none">
+  <source src="https://wedding-invite-1324172788.cos-website.ap-beijing.myqcloud.com/music/bgm.m4a" type="audio/mp4" />
+  <source src="music/bgm.m4a" type="audio/mp4" />
+</audio>
 
 <!-- 音乐播放按钮（默认暂停） -->
 <button id="musicBtn" class="music-btn" type="button" aria-label="播放背景音乐">
@@ -897,6 +904,8 @@ footer{
     if (envOpened) return;
     envOpened = true;
     env.classList.add('open');
+    /* 打开信封即自动播放音乐（在点击事件内同步调用，确保浏览器允许出声） */
+    if (typeof startMusic === 'function'){ startMusic(); }
     /* 信封卡片浮起 → 整体淡出，露出主页 */
     setTimeout(function(){ env.classList.add('done'); }, 700);
     setTimeout(function(){ env.style.display = 'none'; }, 1700);
@@ -1282,28 +1291,17 @@ footer{
     };
   })();
 
-  /* 播放 / 暂停切换 */
-  musicBtn.addEventListener('click', function(){
-    var isPlaying = musicBtn.classList.contains('playing');
-    if (isPlaying){
-      /* 停止：真实音乐与内置旋律都停 */
-      try { bgm.pause(); } catch(e){}
-      MusicBox.stop();
-      musicBtn.classList.remove('playing');
-      musicBtn.setAttribute('aria-label', '播放背景音乐');
-      return;
-    }
-
-    /* 优先真实音乐：文件就绪且未出错才使用 */
+  /* 开始播放（真实音乐优先，加载失败自动用内置旋律兜底） */
+  function startMusic(){
+    if (musicBtn.classList.contains('playing')) return; /* 已在播放 */
     var useReal = false;
     try { useReal = !bgmBroken && (bgm.readyState >= 1 || bgmTried); } catch(e){ useReal = false; }
-
     if (useReal){
       var p = bgm.play();
       if (p && p.catch){
         p.catch(function(){
           /* 真实音乐播放失败（例如文件损坏）→ 兜底旋律 */
-          MusicBox.play();
+          if (!musicBtn.classList.contains('playing')) MusicBox.play();
         });
       }
     } else {
@@ -1311,6 +1309,20 @@ footer{
     }
     musicBtn.classList.add('playing');
     musicBtn.setAttribute('aria-label', '暂停背景音乐');
+  }
+
+  /* 停止播放（真实音乐与内置旋律都停） */
+  function stopMusic(){
+    try { bgm.pause(); } catch(e){}
+    MusicBox.stop();
+    musicBtn.classList.remove('playing');
+    musicBtn.setAttribute('aria-label', '播放背景音乐');
+  }
+
+  /* 音乐按钮：播放 / 暂停切换（打开信封时也会自动播放） */
+  musicBtn.addEventListener('click', function(){
+    if (musicBtn.classList.contains('playing')){ stopMusic(); }
+    else { startMusic(); }
   });
 
 })();
