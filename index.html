@@ -24,12 +24,10 @@
        上传覆盖 music/ 目录下的同名文件即可
      · 若音乐加载失败，自动用内置八音盒旋律兜底
   6. 受邀人回复（数据存储）：
-     · 已配置"邮箱直收"（FormSubmit 零注册）：
-       回复将自动发送到 356543512@qq.com；
-       第一次有客人提交后，请到邮箱点击激活邮件确认，
-       之后即开始正常接收全部回复
-     · 如需更换邮箱：搜索「DIRECT_ENDPOINT」替换成
-       https://formsubmit.co/ajax/新邮箱 即可
+     · 默认写入腾讯云 COS：wedding-rsvp 存储桶 rsvp/ 目录
+       （每位客人一个 JSON 文件，登录 COS 控制台可查看/下载）
+     · COS 写入失败自动改发邮箱：FormSubmit → 356543512@qq.com
+     · 想改地址：搜索「COS_PUT_URL」「MAIL_ENDPOINT」替换
   7. 酒店位置链接：搜索「surl.amap.com」替换成你的导航短链
   8. 部署成 H5 链接（让所有人点开就能看）：
      · 把「婚礼邀请函.html」「music」「photos」文件夹一起上传到
@@ -1110,18 +1108,15 @@ footer{
 
   /* ==========================================================
      5. 受邀人回复表单
-     ★ 数据存储方式（已选定：邮箱直收 FormSubmit，零注册）★
-     · DIRECT_ENDPOINT 已配置为你的邮箱：
-       https://formsubmit.co/ajax/356543512@qq.com
-       提交后回复会自动发送到该邮箱
-     · 说明：FormSubmit 无需注册；第一次有客人提交后，你会收到
-       一封激活邮件，点击确认后即开始接收全部回复
-     · 未填接口时（备用）：客人提交后一键复制回复文本，
-       通过微信 / 短信发送给你们，数据不会丢失
-     · 如需直通飞书 / 腾讯文档后台，需使用支持云函数的部署平台
-       （Vercel / Netlify / Cloudflare Pages），可找我加转发函数
+     ★ 数据存储方式（腾讯云 COS 直传 + 邮箱兜底）★
+     · 方式一（默认）：直接写入腾讯云 COS 桶
+       COS_PUT_URL 为"wedding-rsvp"桶的 rsvp/ 目录，
+       每位客人提交后生成一个 JSON 文件（含姓名/人数/留言/时间）
+     · 方式二（兜底）：COS 写入失败时自动改发 FormSubmit 邮箱
+     · 方式三（最终兜底）：复制回复文本，通过微信/短信发送
      ========================================================== */
-  var DIRECT_ENDPOINT = 'https://formsubmit.co/ajax/356543512@qq.com';
+  var COS_PUT_URL = 'https://wedding-rsvp-1324172788.cos.ap-beijing.myqcloud.com/rsvp/';
+  var MAIL_ENDPOINT = 'https://formsubmit.co/ajax/356543512@qq.com';
 
   var rsvpForm      = document.getElementById('rsvpForm');
   var rsvpOk        = document.getElementById('rsvpOk');
@@ -1187,24 +1182,41 @@ footer{
     };
     rsvpCopyText.value = buildReplyText(data);
 
-    if (DIRECT_ENDPOINT){
-      /* 方式一：直传接口（如 FormSubmit / Formspree） */
-      fetch(DIRECT_ENDPOINT, {
+    /* 成功 / 失败最终处理（只执行一次） */
+    var done = false;
+    function success(msg){
+      if (done) return; done = true;
+      okHint.textContent = msg;
+      showRsvpOk(name, false);
+    }
+    function copyFallback(){
+      if (done) return; done = true;
+      okHint.textContent = '提交未成功，请复制下方回复，通过微信或短信发送给新人。';
+      showRsvpOk(name, true);
+    }
+
+    /* 方式一：直接写入腾讯云 COS（每位客人一个 JSON 文件） */
+    var stamp = new Date().toISOString().replace(/[-:TZ]/g, '').replace(/\.\d+/, '');
+    var key = stamp + '-' + Math.random().toString(36).slice(2, 8) + '.json';
+    fetch(COS_PUT_URL + key, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(function(r){
+      if (r.ok){ success('您的回复已提交成功，感谢您！'); }
+      else { mailFallback(); }
+    }).catch(mailFallback);
+
+    /* 方式二（兜底）：改发 FormSubmit 邮箱 */
+    function mailFallback(){
+      fetch(MAIL_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(data)
-      }).then(function(){
-        okHint.textContent = '您的回复已提交成功，感谢您！';
-        showRsvpOk(name, false);
-      }).catch(function(){
-        /* 直传失败 → 兜底：请客人复制回复发送 */
-        okHint.textContent = '提交未成功，请复制下方回复，通过微信或短信发送给新人。';
-        showRsvpOk(name, true);
-      });
-    } else {
-      /* 方式二（默认）：生成回复文本，客人一键复制发送给新人 */
-      okHint.textContent = '请复制下方回复，通过微信或短信发送给新人。';
-      showRsvpOk(name, true);
+      }).then(function(r){
+        if (r.ok){ success('已通过邮箱收到您的回复，感谢您！'); }
+        else { copyFallback(); }
+      }).catch(copyFallback);
     }
   });
 
